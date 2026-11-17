@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#101413">
+  <title>Ringside | Live Control</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101413;
+      color: #f1f3ef;
+      font-synthesis: none;
+      --panel: #191f1d;
+      --panel-2: #202725;
+      --line: #303936;
+      --muted: #9da8a2;
+      --lime: #c5f26b;
+      --red: #ff5b56;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 320px; min-height: 100vh; }
+    button, textarea { font: inherit; }
+    button {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      padding: 10px 13px;
+      color: #f1f3ef;
+      background: #252d2a;
+      cursor: pointer;
+      transition: background .15s, border-color .15s, transform .15s;
+    }
+    button:hover { background: #303a35; border-color: #53605a; }
+    button:active { transform: translateY(1px); }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    button.primary { color: #12170e; background: var(--lime); border-color: var(--lime); font-weight: 750; }
+    button.primary:hover { background: #d3ff7e; }
+    button.subtle { background: transparent; }
+    button.danger { color: #ffaaa6; }
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 82px;
+      padding: 10px;
+      color: #e7ece8;
+      background: #111614;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      resize: vertical;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+    }
+    .app { min-height: 100vh; display: flex; flex-direction: column; }
+    .topbar {
+      min-height: 66px;
+      padding: 12px clamp(14px, 2.4vw, 34px);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      border-bottom: 1px solid var(--line);
+      background: #151a18;
+    }
+    .brand { display: flex; align-items: center; gap: 11px; }
+    .brand-mark {
+      width: 34px; height: 34px; display: grid; place-items: center;
+      color: #17200f; background: var(--lime); border-radius: 10px; font-size: 19px; font-weight: 900;
+    }
+    .brand-name { font-size: 15px; font-weight: 800; letter-spacing: .03em; }
+    .brand-sub { margin-top: 2px; color: var(--muted); font-size: 11px; }
+    .top-status { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #68746d; display: inline-block; }
+    .status-dot.live { background: var(--red); box-shadow: 0 0 12px #ff5b5680; }
+    .status-dot.good { background: var(--lime); }
+    main { width: min(1600px, 100%); margin: 0 auto; padding: clamp(14px, 2vw, 28px); flex: 1; }
+    .heading { display: flex; align-items: end; justify-content: space-between; gap: 15px; margin-bottom: 17px; }
+    h1 { margin: 0; font-size: clamp(20px, 2vw, 28px); letter-spacing: -.035em; }
+    .event-meta { margin-top: 5px; color: var(--muted); font-size: 12px; }
+    .event-tag { color: var(--lime); font-size: 11px; font-weight: 700; letter-spacing: .1em; }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 13px; overflow: hidden; }
+    .panel-head {
+      min-height: 48px; padding: 11px 15px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .panel-title { font-size: 12px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+    .tiny { color: var(--muted); font-size: 11px; }
+    .program-screen {
+      position: relative; display: grid; place-items: center; overflow: hidden;
+      aspect-ratio: 16 / 9; background:
+        radial-gradient(ellipse at center, #202a26 0, #141a18 65%, #0c100f 100%);
+    }
+    .program-screen video { width: 100%; height: 100%; object-fit: contain; background: #080b0a; }
+    .screen-placeholder { padding: 20px; text-align: center; color: var(--muted); }
+    .screen-placeholder .icon { margin-bottom: 9px; color: #56625b; font-size: 30px; }
+    .screen-placeholder strong { display: block; color: #dce2dd; font-size: 14px; }
+    .screen-placeholder p { margin: 6px 0 0; font-size: 12px; }
+    .screen-badge { position: absolute; z-index: 1; top: 12px; left: 12px; padding: 5px 8px; border-radius: 5px; background: #111a; font-size: 10px; font-weight: 800; letter-spacing: .08em; }
+    .screen-badge.live { color: white; background: var(--red); }
+    .screen-name { position: absolute; z-index: 1; bottom: 12px; left: 12px; padding: 6px 9px; border-radius: 5px; background: #111c; font-size: 11px; }
+    .program-controls { padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+    .program-controls .spacer { flex: 1; }
+    .replay-status { color: var(--muted); font-size: 11px; margin-right: 4px; }
+    .sources-panel .panel-head { min-height: 48px; }
+    .source-grid { padding: 11px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+    .source-card {
+      position: relative; min-width: 0; aspect-ratio: 16 / 10; overflow: hidden; padding: 0;
+      text-align: left; background: #111614; border-color: #303936;
+    }
+    .source-card.selected { border: 2px solid var(--lime); }
+    .source-card video { width: 100%; height: 100%; display: block; object-fit: cover; background: #111614; }
+    .source-empty { width: 100%; height: 100%; display: grid; place-content: center; justify-items: center; gap: 5px; color: #829088; }
+    .source-empty b { color: #c5cdc7; font-size: 11px; }
+    .source-empty span { font-size: 10px; }
+    .source-label { position: absolute; left: 7px; bottom: 7px; padding: 4px 6px; border-radius: 4px; background: #0c100fdb; font-size: 10px; font-weight: 700; }
+    .source-live { position: absolute; top: 7px; right: 7px; color: var(--lime); font-size: 9px; font-weight: 900; letter-spacing: .08em; }
+    .source-target { position: absolute; top: 7px; left: 7px; color: #111; background: var(--lime); border-radius: 4px; padding: 3px 5px; font-size: 8px; font-weight: 900; }
+    .camera-actions { padding: 0 11px 12px; display: flex; gap: 8px; }
+    .camera-actions button { flex: 1; font-size: 11px; padding: 9px 7px; }
+    .pair-panel { margin-top: 14px; }
+    .pair-body { padding: 14px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+    .step { min-width: 0; }
+    .step h3 { margin: 0 0 5px; font-size: 12px; }
+    .step p { margin: 0 0 9px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .step .actions { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 7px; }
+    .step button { font-size: 11px; padding: 8px 10px; }
+    .notice { margin: 0 14px 14px; padding: 10px 12px; border: 1px solid #62522d; border-radius: 8px; color: #e9d8a5; background: #392f1c55; font-size: 11px; line-height: 1.5; }
+    .toast { position: fixed; z-index: 5; left: 50%; bottom: 20px; transform: translate(-50%, 20px); opacity: 0; pointer-events: none; padding: 10px 14px; border: 1px solid var(--line); border-radius: 9px; color: #f2f5f1; background: #252d2a; box-shadow: 0 8px 30px #0008; font-size: 12px; transition: .2s; }
+    .toast.show { transform: translate(-50%, 0); opacity: 1; }
+    .phone-view { width: min(540px, 100%); margin: 0 auto; }
+    .phone-view .program-screen { border-radius: 10px; }
+    .phone-intro { margin: 18px 0; }
+    .phone-intro p { color: var(--muted); line-height: 1.55; font-size: 13px; }
+    .phone-step { margin: 12px 0; padding: 15px; }
+    .phone-step h2 { margin: 0 0 7px; font-size: 14px; }
+    .phone-step button { margin-top: 10px; }
+    .phone-foot { margin-top: 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+    .hidden { display: none !important; }
+    @media (max-width: 900px) {
+      .workspace { grid-template-columns: minmax(0, 1.25fr) minmax(275px, 1fr); }
+    }
+    @media (max-width: 700px) {
+      .topbar { min-height: 58px; }
+      .workspace { grid-template-columns: minmax(0, 1fr); }
+      .heading { align-items: start; flex-direction: column; }
+      .sources-panel { order: -1; }
+      .pair-body { grid-template-columns: minmax(0, 1fr); }
+      main { padding: 13px; }
+    }
+    @media (max-width: 420px) {
+      .top-status .status-text { display: none; }
+      .source-grid { gap: 7px; padding: 8px; }
+      .camera-actions { padding: 0 8px 9px; }
+      .program-controls { padding: 9px; }
+    }
+    @media (max-height: 740px) and (min-width: 701px) {
+      main { padding-top: 12px; padding-bottom: 12px; }
+      .heading { margin-bottom: 10px; }
+      .program-screen { max-height: 52vh; }
+      .source-grid { padding: 8px; gap: 7px; }
+      .camera-actions { padding-bottom: 8px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">R</div>
+        <div><div class="brand-name">RINGSIDE</div><div class="brand-sub">Live production desk</div></div>
+      </div>
+      <div class="top-status"><span id="connectionDot" class="status-dot"></span><span id="connectionText" class="status-text">No camera connected</span></div>
+    </header>
+
+    <main id="directorView">
+      <div class="heading">
+        <div><div class="event-tag">EVENT CONTROL</div><h1>Match day</h1><div class="event-meta">Live camera switcher · up to 6 sources</div></div>
+        <button id="phoneLinkButton" class="subtle">Copy phone camera link</button>
+      </div>
+      <div class="workspace">
+        <section class="panel">
+          <div class="panel-head"><span class="panel-title">Program output</span><span id="programState" class="tiny">STANDBY</span></div>
+          <div id="programScreen" class="program-screen">
+            <div id="programPlaceholder" class="screen-placeholder"><div class="icon">◉</div><strong>Choose a camera to go live</strong><p>Connect your phone or start a camera preview.</p></div>
+            <video id="programVideo" class="hidden" autoplay playsinline muted></video>
+            <video id="replayVideo" class="hidden" playsinline controls></video>
+            <span id="liveBadge" class="screen-badge hidden">LIVE PREVIEW</span>
+            <span id="programName" class="screen-name hidden"></span>
+          </div>
+          <div class="program-controls">
+            <button id="replayButton" disabled>↺ Replay</button>
+            <span id="replayStatus" class="replay-status">Replay buffer is empty</span>
+            <span class="spacer"></span>
+            <button id="returnLiveButton" class="subtle hidden">Return to live</button>
+          </div>
+        </section>
+
+        <section class="panel sources-panel">
+          <div class="panel-head"><span class="panel-title">Camera sources</span><span class="tiny">Select a tile for program</span></div>
+          <div id="sourceGrid" class="source-grid"></div>
+          <div class="camera-actions">
+            <button id="pairButton" class="primary">＋ Pair phone camera</button>
+            <button id="localCameraButton">Use this device</button>
+          </div>
+        </section>
+      </div>
+
+      <section id="pairPanel" class="panel pair-panel hidden">
+        <div class="panel-head"><span class="panel-title">Connect a phone camera</span><button id="closePairButton" class="subtle">Close</button></div>
+        <div class="pair-body">
+          <div class="step">
+            <h3>1 · Create a pairing code here</h3>
+            <p>Open the phone link on your phone, paste this offer there, and start its camera.</p>
+            <textarea id="offerText" readonly placeholder="Create an offer to show the pairing code"></textarea>
+            <div class="actions"><button id="createOfferButton" class="primary">Create offer</button><button id="copyOfferButton" disabled>Copy offer</button></div>
+          </div>
+          <div class="step">
+            <h3>2 · Complete the connection</h3>
+            <p>Copy the answer from the phone and paste it here.</p>
+            <textarea id="answerText" placeholder="Paste the phone's answer code"></textarea>
+            <div class="actions"><button id="connectAnswerButton" disabled>Connect phone</button></div>
+          </div>
+        </div>
+        <div class="notice">For phone camera access, open this page over HTTPS on both devices and keep them on the same Wi-Fi. This prototype pairs directly and has no relay server, so some networks may block the connection. Replay is a short local preview buffer, not broadcast recording.</div>
+      </section>
+    </main>
+
+    <main id="phoneView" class="hidden">
+      <div class="phone-view">
+        <div class="phone-intro"><div class="event-tag">CAMERA SOURCE</div><h1>Connect this phone</h1><p>Keep this page open while the desktop receives your camera. Use a stable connection and allow camera access when asked.</p></div>
+        <div class="program-screen">
+          <video id="phonePreview" autoplay playsinline muted></video>
+          <div id="phonePlaceholder" class="screen-placeholder"><div class="icon">◉</div><strong>Phone camera is off</strong><p>Pair with the desktop, then start the camera.</p></div>
+        </div>
+        <section class="panel phone-step">
+          <h2>1 · Paste the offer from the desktop</h2>
+          <textarea id="phoneOfferText" placeholder="Paste the desktop offer code here"></textarea>
+          <button id="startPhoneButton" class="primary">Start camera &amp; create answer</button>
+        </section>
+        <section class="panel phone-step">
+          <h2>2 · Send your answer back to the desktop</h2>
+          <textarea id="phoneAnswerText" readonly placeholder="Your answer will appear here"></textarea>
+          <button id="copyPhoneAnswerButton" disabled>Copy answer</button>
+        </section>
+        <button id="stopPhoneButton" class="danger">Stop camera</button>
+        <div class="phone-foot">Camera access requires HTTPS. Do not close this page during the test. Connection success depends on your network.</div>
+      </div>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    (function () {
+      "use strict";
+      const phoneMode = new URLSearchParams(location.search).has("phone");
+      const directorView = document.getElementById("directorView");
+      const phoneView = document.getElementById("phoneView");
+      if (phoneMode) {
+        directorView.classList.add("hidden");
+        phoneView.classList.remove("hidden");
+        document.title = "Ringside | Phone Camera";
+      }
+
+      const toast = document.getElementById("toast");
+      let toastTimer;
+      function notify(message) {
+        toast.textContent = message;
+        toast.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 3000);
+      }
+
+      function waitForIce(pc) {
+        return new Promise(function (resolve) {
+          if (pc.iceGatheringState === "complete") return resolve();
+          const timeout = setTimeout(done, 15000);
+          function done() {
+            clearTimeout(timeout);
+            pc.removeEventListener("icegatheringstatechange", check);
+            resolve();
+          }
+          function check() {
+            if (pc.iceGatheringState === "complete") done();
+          }
+          pc.addEventListener("icegatheringstatechange", check);
+        });
+      }
+
+      function makePeer() {
+        return new RTCPeerConnection({ iceServers: [] });
+      }
+
+      function setConnectionState(state) {
+        if (phoneMode) return;
+        const dot = document.getElementById("connectionDot");
+        const text = document.getElementById("connectionText");
+        dot.className = "status-dot" + (state === "connected" ? " good" : state === "connecting" ? " live" : "");
+        text.textContent = state === "connected" ? "Camera connected" : state === "connecting" ? "Connecting…" : "No camera connected";
+      }
+
+      function refreshConnectionState() {
+        const states = peers.filter(Boolean).map(function (peer) { return peer.connectionState; });
+        if (states.includes("connected")) setConnectionState("connected");
+        else if (states.includes("connecting") || states.includes("new")) setConnectionState("connecting");
+        else setConnectionState("disconnected");
+      }
+
+      if (phoneMode) {
+        let phonePeer = null;
+        let phoneStream = null;
+        const phonePreview = document.getElementById("phonePreview");
+        const phonePlaceholder = document.getElementById("phonePlaceholder");
+        const phoneOfferText = document.getElementById("phoneOfferText");
+        const phoneAnswerText = document.getElementById("phoneAnswerText");
+        const startPhoneButton = document.getElementById("startPhoneButton");
+        const stopPhoneButton = document.getElementById("stopPhoneButton");
+        const copyPhoneAnswerButton = document.getElementById("copyPhoneAnswerButton");
+
+        startPhoneButton.addEventListener("click", async function () {
+          if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            notify("Camera access requires HTTPS. Open the secure website link on your phone.");
+            return;
+          }
+          let offer;
+          try {
+            offer = JSON.parse(phoneOfferText.value.trim());
+            if (offer.type !== "offer" || !offer.sdp) throw new Error("Invalid offer");
+          } catch (error) {
+            notify("Paste a valid offer code from the desktop first.");
+            return;
+          }
+          startPhoneButton.disabled = true;
+          try {
+            phoneStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 } }
+            });
+            phonePreview.srcObject = phoneStream;
+            phonePlaceholder.classList.add("hidden");
+            phonePeer = makePeer();
+            phonePeer.onconnectionstatechange = function () {
+              if (phonePeer.connectionState === "failed") notify("Connection failed. Check both devices' network access.");
+            };
+            await phonePeer.setRemoteDescription(offer);
+            phoneStream.getTracks().forEach(function (track) { phonePeer.addTrack(track, phoneStream); });
+            const answer = await phonePeer.createAnswer();
+            await phonePeer.setLocalDescription(answer);
+            await waitForIce(phonePeer);
+            phoneAnswerText.value = JSON.stringify(phonePeer.localDescription);
+            copyPhoneAnswerButton.disabled = false;
+            notify("Camera ready. Copy the answer back to the desktop.");
+          } catch (error) {
+            stopPhone();
+            notify(error.name === "NotAllowedError" ? "Camera permission was denied." : "Could not start camera: " + error.message);
+          } finally {
+            startPhoneButton.disabled = false;
+          }
+        });
+        function stopPhone() {
+          if (phonePeer) phonePeer.close();
+          phonePeer = null;
+          if (phoneStream) phoneStream.getTracks().forEach(function (track) { track.stop(); });
+          phoneStream = null;
+          phonePreview.srcObject = null;
+          phonePlaceholder.classList.remove("hidden");
+          phoneAnswerText.value = "";
+          copyPhoneAnswerButton.disabled = true;
+        }
+        stopPhoneButton.addEventListener("click", stopPhone);
+        copyPhoneAnswerButton.addEventListener("click", async function () {
+          try { await navigator.clipboard.writeText(phoneAnswerText.value); notify("Answer copied."); }
+          catch (error) { phoneAnswerText.select(); notify("Select and copy the answer code."); }
+        });
+        window.addEventListener("pagehide", stopPhone);
+        return;
+      }
+
+      const sourceGrid = document.getElementById("sourceGrid");
+      const programVideo = document.getElementById("programVideo");
+      const replayVideo = document.getElementById("replayVideo");
+      const programPlaceholder = document.getElementById("programPlaceholder");
+      const programName = document.getElementById("programName");
+      const liveBadge = document.getElementById("liveBadge");
+      const programState = document.getElementById("programState");
+      const replayButton = document.getElementById("replayButton");
+      const replayStatus = document.getElementById("replayStatus");
+      const returnLiveButton = document.getElementById("returnLiveButton");
+      const offerText = document.getElementById("offerText");
+      const answerText = document.getElementById("answerText");
+      const copyOfferButton = document.getElementById("copyOfferButton");
+      const connectAnswerButton = document.getElementById("connectAnswerButton");
+      const pairPanel = document.getElementById("pairPanel");
+      const slots = [];
+      let selectedIndex = -1;
+      let targetIndex = 0;
+      const peers = new Array(6).fill(null);
+      let pairingPeer = null;
+      let pairingTarget = 0;
+      let replayRecorder = null;
+      let replayChunks = [];
+      let replayTimer = null;
+      let replayObjectUrl = null;
+      const replayWindowMs = 20000;
+
+      for (let i = 0; i < 6; i++) {
+        const card = document.createElement("button");
+        card.className = "source-card";
+        card.type = "button";
+        card.setAttribute("aria-label", "Camera " + (i + 1) + ", empty");
+        card.innerHTML = '<div class="source-empty"><b>CAM ' + String(i + 1).padStart(2, "0") + '</b><span>Click to select</span></div><span class="source-label">CAM ' + String(i + 1).padStart(2, "0") + '</span>';
+        card.addEventListener("click", function () {
+          targetIndex = i;
+          if (slots[i].stream) selectSource(i);
+          else {
+            renderSlots();
+            notify("CAM " + String(i + 1).padStart(2, "0") + " selected. Pair a phone or start this device's camera.");
+          }
+        });
+        sourceGrid.appendChild(card);
+        slots.push({ card: card, stream: null, name: "CAM " + String(i + 1).padStart(2, "0") });
+      }
+
+      function renderSlots() {
+        slots.forEach(function (slot, index) {
+          slot.card.classList.toggle("selected", index === selectedIndex);
+          slot.card.innerHTML = slot.stream
+            ? '<video autoplay playsinline muted></video><span class="source-label">' + slot.name + '</span><span class="source-live">READY</span>'
+            : '<div class="source-empty"><b>' + slot.name + '</b><span>Click to select</span></div><span class="source-label">' + slot.name + '</span>';
+          slot.card.setAttribute("aria-label", slot.name + (slot.stream ? ", connected" : ", empty"));
+          if (slot.stream) slot.card.querySelector("video").srcObject = slot.stream;
+        });
+      }
+
+      function clearReplay() {
+        if (replayRecorder && replayRecorder.state !== "inactive") replayRecorder.stop();
+        replayRecorder = null;
+        replayChunks = [];
+        clearInterval(replayTimer);
+        replayTimer = null;
+        replayButton.disabled = true;
+        replayStatus.textContent = "Replay buffer is empty";
+      }
+
+      function updateReplayStatus() {
+        const first = replayChunks.length ? replayChunks[0].at : Date.now();
+        const seconds = Math.max(0, Math.min(20, Math.floor((Date.now() - first) / 1000)));
+        replayStatus.textContent = seconds ? "Last " + seconds + " sec buffered · selected source only" : "Building replay buffer…";
+        replayButton.disabled = replayChunks.length < 2;
+      }
+
+      function startReplayBuffer(stream) {
+        clearReplay();
+        if (!window.MediaRecorder || !stream || !stream.getVideoTracks().length) {
+          replayStatus.textContent = "Replay is not supported in this browser";
+          return;
+        }
+        try {
+          const options = {};
+          if (MediaRecorder.isTypeSupported("video/webm;codecs=vp8")) options.mimeType = "video/webm;codecs=vp8";
+          const recorder = new MediaRecorder(stream, options);
+          replayRecorder = recorder;
+          recorder.ondataavailable = function (event) {
+            if (replayRecorder !== recorder) return;
+            if (!event.data || !event.data.size) return;
+            replayChunks.push({ blob: event.data, at: Date.now() });
+            const cutoff = Date.now() - replayWindowMs;
+            replayChunks = replayChunks.filter(function (chunk) { return chunk.at >= cutoff; });
+            updateReplayStatus();
+          };
+          recorder.onerror = function () { replayStatus.textContent = "Replay recording stopped"; };
+          recorder.start(1000);
+          replayTimer = setInterval(updateReplayStatus, 1000);
+        } catch (error) {
+          replayStatus.textContent = "Replay unavailable: " + error.message;
+        }
+      }
+
+      function showLive() {
+        replayVideo.pause();
+        replayVideo.classList.add("hidden");
+        programVideo.classList.remove("hidden");
+        returnLiveButton.classList.add("hidden");
+        if (replayObjectUrl) {
+          URL.revokeObjectURL(replayObjectUrl);
+          replayObjectUrl = null;
+        }
+      }
+
+      function selectSource(index) {
+        if (!slots[index] || !slots[index].stream) return;
+        selectedIndex = index;
+        targetIndex = index;
+        showLive();
+        programVideo.srcObject = slots[index].stream;
+        programVideo.classList.remove("hidden");
+        programPlaceholder.classList.add("hidden");
+        liveBadge.classList.remove("hidden");
+        programName.classList.remove("hidden");
+        programName.textContent = slots[index].name;
+        programState.textContent = "PREVIEW";
+        renderSlots();
+        startReplayBuffer(slots[index].stream);
+      }
+
+      function assignStream(stream, name, sourceIndex) {
+        const index = typeof sourceIndex === "number" ? sourceIndex : targetIndex;
+        if (slots[index].stream) slots[index].stream.getTracks().forEach(function (track) { track.stop(); });
+        slots[index].stream = stream;
+        slots[index].name = name || slots[index].name;
+        renderSlots();
+        selectSource(index);
+        setConnectionState("connected");
+        stream.getTracks().forEach(function (track) {
+          track.addEventListener("ended", function () {
+            if (slots[index].stream === stream) {
+              slots[index].stream = null;
+              if (selectedIndex === index) {
+                selectedIndex = -1;
+                programVideo.srcObject = null;
+                programVideo.classList.add("hidden");
+                programPlaceholder.classList.remove("hidden");
+                liveBadge.classList.add("hidden");
+                programName.classList.add("hidden");
+                programState.textContent = "STANDBY";
+                clearReplay();
+              }
+              renderSlots();
+              refreshConnectionState();
+            }
+          });
+        });
+      }
+
+      document.getElementById("pairButton").addEventListener("click", function () {
+        pairPanel.classList.remove("hidden");
+        pairPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        targetIndex = selectedIndex >= 0 ? selectedIndex : targetIndex;
+      });
+      document.getElementById("closePairButton").addEventListener("click", function () { pairPanel.classList.add("hidden"); });
+      document.getElementById("createOfferButton").addEventListener("click", async function () {
+        if (!window.RTCPeerConnection) { notify("WebRTC is not supported by this browser."); return; }
+        pairingTarget = targetIndex;
+        const peerTarget = pairingTarget;
+        if (peers[pairingTarget]) peers[pairingTarget].close();
+        peers[pairingTarget] = null;
+        pairingPeer = null;
+        setConnectionState("connecting");
+        offerText.value = "Creating offer…";
+        answerText.value = "";
+        connectAnswerButton.disabled = true;
+        try {
+          const peer = makePeer();
+          pairingPeer = peer;
+          peers[pairingTarget] = peer;
+          peer.addTransceiver("video", { direction: "recvonly" });
+          peer.ontrack = function (event) {
+            const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
+            assignStream(stream, "PHONE CAM " + String(peerTarget + 1).padStart(2, "0"), peerTarget);
+          };
+          peer.onconnectionstatechange = function () {
+            refreshConnectionState();
+          };
+          const offer = await peer.createOffer();
+          await peer.setLocalDescription(offer);
+          await waitForIce(peer);
+          offerText.value = JSON.stringify(peer.localDescription);
+          copyOfferButton.disabled = false;
+          connectAnswerButton.disabled = false;
+          notify("Offer ready. Copy it to the phone camera page.");
+        } catch (error) {
+          offerText.value = "";
+          setConnectionState("disconnected");
+          notify("Could not create offer: " + error.message);
+        }
+      });
+      copyOfferButton.addEventListener("click", async function () {
+        try { await navigator.clipboard.writeText(offerText.value); notify("Offer copied."); }
+        catch (error) { offerText.select(); notify("Select and copy the offer code."); }
+      });
+      connectAnswerButton.addEventListener("click", async function () {
+        try {
+          const answer = JSON.parse(answerText.value.trim());
+          if (!pairingPeer || answer.type !== "answer" || !answer.sdp) throw new Error("Paste a valid phone answer first.");
+          await pairingPeer.setRemoteDescription(answer);
+          notify("Answer sent. Waiting for the camera connection…");
+        } catch (error) {
+          notify(error.message === "Paste a valid phone answer first." ? error.message : "Invalid answer code. Copy the full answer from the phone.");
+        }
+      });
+      document.getElementById("localCameraButton").addEventListener("click", async function () {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          notify("Camera access unavailable. Use HTTPS or open this page on localhost.");
+          return;
+        }
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 1280 }, height: { ideal: 720 } } });
+          assignStream(stream, "LOCAL CAM");
+        } catch (error) {
+          notify(error.name === "NotAllowedError" ? "Camera permission was denied." : "Could not start camera: " + error.message);
+        }
+      });
+      document.getElementById("phoneLinkButton").addEventListener("click", async function () {
+        if (location.protocol !== "https:") {
+          notify("Host this page over HTTPS before using the phone camera.");
+          return;
+        }
+        const phoneUrl = new URL(location.href);
+        phoneUrl.searchParams.set("phone", "1");
+        try { await navigator.clipboard.writeText(phoneUrl.href); notify("Phone camera link copied. Open it on your phone."); }
+        catch (error) {
+          notify("Copy the phone URL from your browser address bar.");
+        }
+      });
+      replayButton.addEventListener("click", function () {
+        if (replayChunks.length < 2) { notify("Wait a moment for the replay buffer to fill."); return; }
+        const mime = replayRecorder && replayRecorder.mimeType ? replayRecorder.mimeType : "video/webm";
+        const blob = new Blob(replayChunks.map(function (chunk) { return chunk.blob; }), { type: mime });
+        if (replayObjectUrl) URL.revokeObjectURL(replayObjectUrl);
+        replayObjectUrl = URL.createObjectURL(blob);
+        programVideo.classList.add("hidden");
+        replayVideo.classList.remove("hidden");
+        replayVideo.src = replayObjectUrl;
+        replayVideo.currentTime = 0;
+        replayVideo.play().catch(function () {});
+        returnLiveButton.classList.remove("hidden");
+      });
+      returnLiveButton.addEventListener("click", showLive);
+      window.addEventListener("beforeunload", function () {
+        peers.filter(Boolean).forEach(function (peer) { peer.close(); });
+        slots.forEach(function (slot) {
+          if (slot.stream) slot.stream.getTracks().forEach(function (track) { track.stop(); });
+        });
+        if (replayObjectUrl) URL.revokeObjectURL(replayObjectUrl);
+      });
+
+      renderSlots();
+      if (!window.isSecureContext && location.hostname !== "localhost" && location.protocol !== "file:") {
+        document.getElementById("connectionText").textContent = "HTTPS needed for cameras";
+      }
+    })();
+  </script>
+</body>
+</html>
