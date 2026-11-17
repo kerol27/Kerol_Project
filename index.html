@@ -215,19 +215,17 @@
         <div class="panel-head"><span class="panel-title">Connect a phone camera</span><button id="closePairButton" class="subtle">Close</button></div>
         <div class="pair-body">
           <div class="step">
-            <h3>1 · Create a pairing code here</h3>
-            <p>Use <b>Copy offer</b> (do not select the long text). Open the same site on your phone, paste the code, and start its camera.</p>
-            <textarea id="offerText" readonly placeholder="Create an offer to show the pairing code"></textarea>
-            <div class="actions"><button id="createOfferButton" class="primary">Create offer</button><button id="copyOfferButton" disabled>Copy offer</button></div>
+            <h3>1 · Create a short camera code</h3>
+            <p>Copy this short code, open the same website on your phone, and enter it there.</p>
+            <textarea id="offerText" readonly placeholder="Generate a short code"></textarea>
+            <div class="actions"><button id="createOfferButton" class="primary">Generate short code</button><button id="copyOfferButton" disabled>Copy code</button></div>
           </div>
           <div class="step">
-            <h3>2 · Complete the connection</h3>
-            <p>Copy the answer from the phone and paste it here.</p>
-            <textarea id="answerText" placeholder="Paste the phone's answer code"></textarea>
-            <div class="actions"><button id="connectAnswerButton" disabled>Connect phone</button></div>
+            <h3>2 · Start the phone camera</h3>
+            <p id="pairingStatus">Waiting for the phone to join.</p>
           </div>
         </div>
-        <div class="notice">For phone camera access, open this page over HTTPS on both devices and keep them on the same Wi-Fi. This prototype pairs directly and has no relay server, so some networks may block the connection. Replay is a short local preview buffer, not broadcast recording.</div>
+        <div class="notice">Connection codes are short because PeerJS's hosted service helps the devices find each other. Video is sent peer-to-peer, not through PeerJS. Both devices need internet access; some networks may block the direct video connection. Replay is a short local preview buffer, not broadcast recording.</div>
       </section>
     </main>
 
@@ -239,22 +237,18 @@
           <div id="phonePlaceholder" class="screen-placeholder"><div class="icon">◉</div><strong>Phone camera is off</strong><p>Pair with the desktop, then start the camera.</p></div>
         </div>
         <section class="panel phone-step">
-          <h2>1 · Paste the copied offer from the desktop</h2>
-          <textarea id="phoneOfferText" placeholder="Paste the desktop offer code here"></textarea>
-          <button id="startPhoneButton" class="primary">Start camera &amp; create answer</button>
-        </section>
-        <section class="panel phone-step">
-          <h2>2 · Copy the answer back to the desktop</h2>
-          <textarea id="phoneAnswerText" readonly placeholder="Your answer will appear here"></textarea>
-          <button id="copyPhoneAnswerButton" disabled>Copy answer</button>
+          <h2>Enter the short code from the desktop</h2>
+          <textarea id="phoneOfferText" maxlength="100" placeholder="Enter the short camera code"></textarea>
+          <button id="startPhoneButton" class="primary">Start camera &amp; connect</button>
         </section>
         <button id="stopPhoneButton" class="danger">Stop camera</button>
-        <div class="phone-foot">Camera access requires HTTPS. Do not close this page during the test. Connection success depends on your network.</div>
+        <div class="phone-foot">Camera access requires HTTPS. Keep this page open while connected. The peer-to-peer video connection depends on your network.</div>
       </div>
     </main>
   </div>
   <div id="toast" class="toast" role="status"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js"></script>
   <script>
     (function () {
       "use strict";
@@ -276,49 +270,6 @@
         toastTimer = setTimeout(function () { toast.classList.remove("show"); }, 3000);
       }
 
-      function waitForIce(pc) {
-        return new Promise(function (resolve) {
-          if (pc.iceGatheringState === "complete") return resolve();
-          const timeout = setTimeout(done, 15000);
-          function done() {
-            clearTimeout(timeout);
-            pc.removeEventListener("icegatheringstatechange", check);
-            resolve();
-          }
-          function check() {
-            if (pc.iceGatheringState === "complete") done();
-          }
-          pc.addEventListener("icegatheringstatechange", check);
-        });
-      }
-
-      async function encodePairingCode(description) {
-        const json = JSON.stringify(description);
-        if (!window.CompressionStream) return json;
-        const compressed = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
-        const bytes = new Uint8Array(await new Response(compressed).arrayBuffer());
-        let binary = "";
-        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
-        return "R1:" + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-      }
-
-      async function decodePairingCode(value) {
-        const code = value.trim().replace(/^["']|["']$/g, "");
-        if (code.charAt(0) === "{") return JSON.parse(code);
-        if (!code.startsWith("R1:")) throw new Error("Unrecognized pairing code. Copy the full code from the desktop.");
-        if (!window.DecompressionStream) throw new Error("This browser cannot read compressed codes. Update your browser.");
-        const base64 = code.slice(3).replace(/-/g, "+").replace(/_/g, "/");
-        const binary = atob(base64 + "=".repeat((4 - base64.length % 4) % 4));
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
-        return JSON.parse(await new Response(stream).text());
-      }
-
-      function makePeer() {
-        return new RTCPeerConnection({ iceServers: [] });
-      }
-
       function setConnectionState(state) {
         if (phoneMode) return;
         const dot = document.getElementById("connectionDot");
@@ -328,34 +279,31 @@
       }
 
       function refreshConnectionState() {
-        const states = peers.filter(Boolean).map(function (peer) { return peer.connectionState; });
-        if (states.includes("connected")) setConnectionState("connected");
-        else if (states.includes("connecting") || states.includes("new")) setConnectionState("connecting");
-        else setConnectionState("disconnected");
+        setConnectionState(slots.some(function (slot) { return !!slot.stream; }) ? "connected" : "disconnected");
       }
 
       if (phoneMode) {
         let phonePeer = null;
         let phoneStream = null;
+        let phoneCall = null;
         const phonePreview = document.getElementById("phonePreview");
         const phonePlaceholder = document.getElementById("phonePlaceholder");
         const phoneOfferText = document.getElementById("phoneOfferText");
-        const phoneAnswerText = document.getElementById("phoneAnswerText");
         const startPhoneButton = document.getElementById("startPhoneButton");
         const stopPhoneButton = document.getElementById("stopPhoneButton");
-        const copyPhoneAnswerButton = document.getElementById("copyPhoneAnswerButton");
 
         startPhoneButton.addEventListener("click", async function () {
           if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
             notify("Camera access requires HTTPS. Open the secure website link on your phone.");
             return;
           }
-          let offer;
-          try {
-            offer = await decodePairingCode(phoneOfferText.value);
-            if (offer.type !== "offer" || !offer.sdp) throw new Error("Invalid offer");
-          } catch (error) {
-            notify(error.message || "Paste a valid offer code from the desktop first.");
+          if (!window.Peer) {
+            notify("The signaling client did not load. Check your internet connection and refresh.");
+            return;
+          }
+          const peerId = phoneOfferText.value.trim();
+          if (!peerId || peerId.length > 100) {
+            notify("Enter the short code shown on the desktop.");
             return;
           }
           startPhoneButton.disabled = true;
@@ -366,40 +314,43 @@
             });
             phonePreview.srcObject = phoneStream;
             phonePlaceholder.classList.add("hidden");
-            phonePeer = makePeer();
-            phonePeer.onconnectionstatechange = function () {
-              if (phonePeer.connectionState === "failed") notify("Connection failed. Check both devices' network access.");
-            };
-            await phonePeer.setRemoteDescription(offer);
-            phoneStream.getTracks().forEach(function (track) { phonePeer.addTrack(track, phoneStream); });
-            const answer = await phonePeer.createAnswer();
-            await phonePeer.setLocalDescription(answer);
-            await waitForIce(phonePeer);
-            phoneAnswerText.value = await encodePairingCode(phonePeer.localDescription);
-            copyPhoneAnswerButton.disabled = false;
-            notify("Camera ready. Copy the answer back to the desktop.");
+            phonePeer = new Peer(undefined, { debug: 1 });
+            const peer = phonePeer;
+            peer.on("open", function () {
+              phoneCall = peer.call(peerId, phoneStream);
+              if (!phoneCall) {
+                notify("Could not call the desktop. Check the code and try again.");
+                startPhoneButton.disabled = false;
+                return;
+              }
+              phoneCall.on("error", function (error) {
+                notify(error.type === "peer-unavailable" ? "Code not found. Generate a fresh code on the desktop." : "Camera connection failed: " + error.message);
+                startPhoneButton.disabled = false;
+              });
+              phoneCall.on("close", function () { notify("Camera connection closed."); });
+              notify("Camera ready. Connecting to the desktop…");
+            });
+            peer.on("error", function (error) {
+              notify(error.type === "peer-unavailable" ? "Code not found. Generate a fresh code on the desktop." : "Signaling error: " + error.message);
+              startPhoneButton.disabled = false;
+            });
           } catch (error) {
             stopPhone();
             notify(error.name === "NotAllowedError" ? "Camera permission was denied." : "Could not start camera: " + error.message);
-          } finally {
-            startPhoneButton.disabled = false;
           }
         });
         function stopPhone() {
-          if (phonePeer) phonePeer.close();
+          if (phoneCall) phoneCall.close();
+          if (phonePeer) phonePeer.destroy();
           phonePeer = null;
+          phoneCall = null;
           if (phoneStream) phoneStream.getTracks().forEach(function (track) { track.stop(); });
           phoneStream = null;
           phonePreview.srcObject = null;
           phonePlaceholder.classList.remove("hidden");
-          phoneAnswerText.value = "";
-          copyPhoneAnswerButton.disabled = true;
+          startPhoneButton.disabled = false;
         }
         stopPhoneButton.addEventListener("click", stopPhone);
-        copyPhoneAnswerButton.addEventListener("click", async function () {
-          try { await navigator.clipboard.writeText(phoneAnswerText.value); notify("Answer copied."); }
-          catch (error) { phoneAnswerText.select(); notify("Select and copy the answer code."); }
-        });
         window.addEventListener("pagehide", stopPhone);
         return;
       }
@@ -415,15 +366,14 @@
       const replayStatus = document.getElementById("replayStatus");
       const returnLiveButton = document.getElementById("returnLiveButton");
       const offerText = document.getElementById("offerText");
-      const answerText = document.getElementById("answerText");
       const copyOfferButton = document.getElementById("copyOfferButton");
-      const connectAnswerButton = document.getElementById("connectAnswerButton");
+      const pairingStatus = document.getElementById("pairingStatus");
       const pairPanel = document.getElementById("pairPanel");
       const slots = [];
       let selectedIndex = -1;
       let targetIndex = 0;
       const peers = new Array(6).fill(null);
-      let pairingPeer = null;
+      const peerCalls = new Array(6).fill(null);
       let pairingTarget = 0;
       let replayRecorder = null;
       let replayChunks = [];
@@ -567,54 +517,74 @@
       });
       document.getElementById("closePairButton").addEventListener("click", function () { pairPanel.classList.add("hidden"); });
       document.getElementById("createOfferButton").addEventListener("click", async function () {
-        if (!window.RTCPeerConnection) { notify("WebRTC is not supported by this browser."); return; }
+        if (!window.Peer) {
+          notify("The signaling client did not load. Check your internet connection and refresh.");
+          return;
+        }
         pairingTarget = targetIndex;
         const peerTarget = pairingTarget;
-        if (peers[pairingTarget]) peers[pairingTarget].close();
+        if (peers[pairingTarget]) peers[pairingTarget].destroy();
+        if (peerCalls[pairingTarget]) peerCalls[pairingTarget].close();
         peers[pairingTarget] = null;
-        pairingPeer = null;
-        setConnectionState("connecting");
-        offerText.value = "Creating offer…";
-        answerText.value = "";
-        connectAnswerButton.disabled = true;
+        peerCalls[pairingTarget] = null;
+        pairingStatus.textContent = "Connecting to signaling service…";
+        offerText.value = "";
+        copyOfferButton.disabled = true;
         try {
-          const peer = makePeer();
-          pairingPeer = peer;
+          const peer = new Peer(undefined, { debug: 1 });
           peers[pairingTarget] = peer;
-          peer.addTransceiver("video", { direction: "recvonly" });
-          peer.ontrack = function (event) {
-            const stream = event.streams && event.streams[0] ? event.streams[0] : new MediaStream([event.track]);
-            assignStream(stream, "PHONE CAM " + String(peerTarget + 1).padStart(2, "0"), peerTarget);
-          };
-          peer.onconnectionstatechange = function () {
-            refreshConnectionState();
-          };
-          const offer = await peer.createOffer();
-          await peer.setLocalDescription(offer);
-          await waitForIce(peer);
-          offerText.value = await encodePairingCode(peer.localDescription);
-          copyOfferButton.disabled = false;
-          connectAnswerButton.disabled = false;
-          notify("Offer ready. Copy it to the phone camera page.");
+          peer.on("open", function (id) {
+            offerText.value = id;
+            copyOfferButton.disabled = false;
+            pairingStatus.textContent = "Code ready. Waiting for the phone to connect…";
+            notify("Short code ready. Enter it on the phone.");
+          });
+          peer.on("call", function (call) {
+            if (peerCalls[peerTarget]) peerCalls[peerTarget].close();
+            peerCalls[peerTarget] = call;
+            pairingStatus.textContent = "Phone is connecting…";
+            call.answer();
+            call.on("stream", function (stream) {
+              assignStream(stream, "PHONE CAM " + String(peerTarget + 1).padStart(2, "0"), peerTarget);
+              pairingStatus.textContent = "Phone camera connected.";
+            });
+            call.on("close", function () {
+              if (peerCalls[peerTarget] === call) peerCalls[peerTarget] = null;
+              if (slots[peerTarget].stream) {
+                slots[peerTarget].stream.getTracks().forEach(function (track) { track.stop(); });
+                slots[peerTarget].stream = null;
+                renderSlots();
+                if (selectedIndex === peerTarget) {
+                  selectedIndex = -1;
+                  programVideo.srcObject = null;
+                  programVideo.classList.add("hidden");
+                  programPlaceholder.classList.remove("hidden");
+                  liveBadge.classList.add("hidden");
+                  programName.classList.add("hidden");
+                  programState.textContent = "STANDBY";
+                  clearReplay();
+                }
+                refreshConnectionState();
+              }
+              pairingStatus.textContent = "Phone disconnected. Reuse the code or generate a new one.";
+            });
+            call.on("error", function (error) {
+              pairingStatus.textContent = "Camera connection failed.";
+              notify("Camera connection failed: " + error.message);
+            });
+          });
+          peer.on("error", function (error) {
+            pairingStatus.textContent = "Signaling error. Generate another code.";
+            notify("Signaling error: " + error.message);
+          });
         } catch (error) {
-          offerText.value = "";
-          setConnectionState("disconnected");
-          notify("Could not create offer: " + error.message);
+          pairingStatus.textContent = "Could not connect to signaling service.";
+          notify("Could not create a short code: " + error.message);
         }
       });
       copyOfferButton.addEventListener("click", async function () {
         try { await navigator.clipboard.writeText(offerText.value); notify("Offer copied."); }
-        catch (error) { offerText.select(); notify("Select and copy the offer code."); }
-      });
-      connectAnswerButton.addEventListener("click", async function () {
-        try {
-          const answer = await decodePairingCode(answerText.value);
-          if (!pairingPeer || answer.type !== "answer" || !answer.sdp) throw new Error("Paste a valid phone answer first.");
-          await pairingPeer.setRemoteDescription(answer);
-          notify("Answer sent. Waiting for the camera connection…");
-        } catch (error) {
-          notify(error.message === "Paste a valid phone answer first." ? error.message : "Invalid answer code. Copy the full answer from the phone.");
-        }
+        catch (error) { offerText.select(); notify("Select and copy the short code."); }
       });
       document.getElementById("localCameraButton").addEventListener("click", async function () {
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -655,7 +625,8 @@
       });
       returnLiveButton.addEventListener("click", showLive);
       window.addEventListener("beforeunload", function () {
-        peers.filter(Boolean).forEach(function (peer) { peer.close(); });
+        peerCalls.filter(Boolean).forEach(function (call) { call.close(); });
+        peers.filter(Boolean).forEach(function (peer) { peer.destroy(); });
         slots.forEach(function (slot) {
           if (slot.stream) slot.stream.getTracks().forEach(function (track) { track.stop(); });
         });
