@@ -216,7 +216,7 @@
         <div class="pair-body">
           <div class="step">
             <h3>1 · Create a pairing code here</h3>
-            <p>Open the phone link on your phone, paste this offer there, and start its camera.</p>
+            <p>Use <b>Copy offer</b> (do not select the long text). Open the same site on your phone, paste the code, and start its camera.</p>
             <textarea id="offerText" readonly placeholder="Create an offer to show the pairing code"></textarea>
             <div class="actions"><button id="createOfferButton" class="primary">Create offer</button><button id="copyOfferButton" disabled>Copy offer</button></div>
           </div>
@@ -239,12 +239,12 @@
           <div id="phonePlaceholder" class="screen-placeholder"><div class="icon">◉</div><strong>Phone camera is off</strong><p>Pair with the desktop, then start the camera.</p></div>
         </div>
         <section class="panel phone-step">
-          <h2>1 · Paste the offer from the desktop</h2>
+          <h2>1 · Paste the copied offer from the desktop</h2>
           <textarea id="phoneOfferText" placeholder="Paste the desktop offer code here"></textarea>
           <button id="startPhoneButton" class="primary">Start camera &amp; create answer</button>
         </section>
         <section class="panel phone-step">
-          <h2>2 · Send your answer back to the desktop</h2>
+          <h2>2 · Copy the answer back to the desktop</h2>
           <textarea id="phoneAnswerText" readonly placeholder="Your answer will appear here"></textarea>
           <button id="copyPhoneAnswerButton" disabled>Copy answer</button>
         </section>
@@ -292,6 +292,29 @@
         });
       }
 
+      async function encodePairingCode(description) {
+        const json = JSON.stringify(description);
+        if (!window.CompressionStream) return json;
+        const compressed = new Blob([json]).stream().pipeThrough(new CompressionStream("gzip"));
+        const bytes = new Uint8Array(await new Response(compressed).arrayBuffer());
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        return "R1:" + btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
+
+      async function decodePairingCode(value) {
+        const code = value.trim().replace(/^["']|["']$/g, "");
+        if (code.charAt(0) === "{") return JSON.parse(code);
+        if (!code.startsWith("R1:")) throw new Error("Unrecognized pairing code. Copy the full code from the desktop.");
+        if (!window.DecompressionStream) throw new Error("This browser cannot read compressed codes. Update your browser.");
+        const base64 = code.slice(3).replace(/-/g, "+").replace(/_/g, "/");
+        const binary = atob(base64 + "=".repeat((4 - base64.length % 4) % 4));
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+        const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+        return JSON.parse(await new Response(stream).text());
+      }
+
       function makePeer() {
         return new RTCPeerConnection({ iceServers: [] });
       }
@@ -329,10 +352,10 @@
           }
           let offer;
           try {
-            offer = JSON.parse(phoneOfferText.value.trim());
+            offer = await decodePairingCode(phoneOfferText.value);
             if (offer.type !== "offer" || !offer.sdp) throw new Error("Invalid offer");
           } catch (error) {
-            notify("Paste a valid offer code from the desktop first.");
+            notify(error.message || "Paste a valid offer code from the desktop first.");
             return;
           }
           startPhoneButton.disabled = true;
@@ -352,7 +375,7 @@
             const answer = await phonePeer.createAnswer();
             await phonePeer.setLocalDescription(answer);
             await waitForIce(phonePeer);
-            phoneAnswerText.value = JSON.stringify(phonePeer.localDescription);
+            phoneAnswerText.value = await encodePairingCode(phonePeer.localDescription);
             copyPhoneAnswerButton.disabled = false;
             notify("Camera ready. Copy the answer back to the desktop.");
           } catch (error) {
@@ -569,7 +592,7 @@
           const offer = await peer.createOffer();
           await peer.setLocalDescription(offer);
           await waitForIce(peer);
-          offerText.value = JSON.stringify(peer.localDescription);
+          offerText.value = await encodePairingCode(peer.localDescription);
           copyOfferButton.disabled = false;
           connectAnswerButton.disabled = false;
           notify("Offer ready. Copy it to the phone camera page.");
@@ -585,7 +608,7 @@
       });
       connectAnswerButton.addEventListener("click", async function () {
         try {
-          const answer = JSON.parse(answerText.value.trim());
+          const answer = await decodePairingCode(answerText.value);
           if (!pairingPeer || answer.type !== "answer" || !answer.sdp) throw new Error("Paste a valid phone answer first.");
           await pairingPeer.setRemoteDescription(answer);
           notify("Answer sent. Waiting for the camera connection…");
